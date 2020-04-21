@@ -1,0 +1,91 @@
+---
+title: "Travail 5 - GAA-7007"
+author: "Karolane Bourdon, NI 111061527"
+date: "21/04/2020"
+output: html_document
+---
+
+```{r results = 'hide', message = FALSE, warning = FALSE}
+library(forecast)
+library(fpp2)
+library(tidyverse)
+library(lubridate)
+```
+
+
+## Créer une série temporelle
+1- Importer les données
+```{r, message = FALSE, warning = FALSE}
+hawai <- read_csv("data/hawai.csv")
+head(hawai)
+```
+**Commentaire :** Les dates en format décimal peuvent être directement reconnues par la fonction de série temporelle. J'ai donc laissé tombé ma modification initiale qui avait été faite à l'aide de la fonction "date_decimal()" du module Lubridate.
+
+2- Créer la série temporelle
+```{r}
+hawai_ts <- ts(hawai %>% dplyr::select(CO2), # Indique les données à utiliser
+              start = c(hawai$time[1]), # Spécifie la date de départ
+               frequency = 12) # Spécifie la fréquence mensuelle (12 observations/année)
+```
+
+3- Visualiser les données
+```{r}
+autoplot(hawai_ts) # Graphique permettant de visualiser la série temporelle et de vérifier la conformité des données au fichier original.
+```
+
+**Commentaire :** La fonction ts() a reconnu les dates décimales. Les données débutent bien en 1958 et terminent à la fin de l'année 2001.
+
+
+## Partitionner les données
+
+```{r results='hide', message=FALSE, warning=FALSE}
+hawai_ts_train <- window(hawai_ts, start = 1958, end = 1988.9) # Données qui seront utilisées pour entraîner le modèle.
+hawai_ts_test <- window(hawai_ts, start = 1989, end = 2002) # Données qui seront utilisées pour tester le modèle.
+```
+**Commentaire** : Puisque l'objectif est de prévoir le futur, la partie servant à tester le modèle doit se trouver à la fin pour travailler en extrapolation. Il est habituel d'utiliser 70% des données pour l'entrainement et 30% pour la vérification du modèle. Dans le cas présent, nous avons près de 44 années de suivi, donc 31 années seront utilisées pour l'entrainement et 13 années serviront à vérifier le modèle.
+
+
+## Créer un modèle ETS
+
+```{r}
+CO2_model <- hawai_ts_train %>%
+  ets() %>%
+  forecast (h = 12*13) # Commande une prédiction pour 13 années (12 observations/an*13 ans)
+
+CO2_model$model$par # Pour visualiser les paramètres du modèle
+
+autoplot(CO2_model) +  # Pour tracer la prédiction
+  autolayer(hawai_ts_test, serie = "Valeurs observées")  # Pour tracer les valeurs réellement observées
+  
+```
+
+**Commentaires :**
+
+ - Bien que les valeurs réelles observées soient dans l'intervalle de confiance de 80% du modèle, ce dernier n'a pas permis de modéliser la tendance générale des données.
+ 
+ - Le modèle automatisé détecte une tendance "Additive damped". En effet, un paramètre "phi" est inclus dans le modèle, ce qui cause une atténuation de la pente avec le temps. Toutefois, les valeurs réelles mesurées montrent une tendance additive sans atténuation dans le temps. Une méthode manuelle nous permettrait de spécifier la tendance additive stricte à l'aide de l'argument "damped = FALSE". 
+
+ - La saisonalité a été détectée comme multiplicative, ce qui permet de modéliser les cycles saisonniers qui sont en effet présents dans les données.
+
+
+## Analyse des résidus
+
+```{r }
+checkresiduals(CO2_model)
+```
+**Commentaire :** Les résidus semblent respecter le postulat de normalité. Par contre, la valeur de p < à 0.05 pour le test de Ljung-Box indique qu'il y a des tendances dans les données qui ne sont pas collectées par le modèle. Ce qui pourrait expliquer que le modèle ait détecté une tendance à l'aplatissement plutôt qu'une tendance additive stricte.
+
+
+## Fiabilité et amélioration du modèle
+La valeurs réelles observées sont dans l'intervalle de confiance de 80%, mais l'intervalle d'erreur du modèle est très grande. En effet, le modèle prédit autant une diminution de la concentration en CO2 qu'une augmentation ou stagnation. Ce modèle prévisionnel est donc peu pratique. Un ajustement manuel permettrait de spécifier la tendance générale ascendente. Un exemple est présenté ci-bas à l'aide du modèle Holt-Winter's.
+
+```{r }
+CO2_hw <- hawai_ts_train %>%
+  hw(h = 12*13, damped = FALSE, seasonal = "additive")
+
+autoplot(CO2_hw) +
+  autolayer(hawai_ts_test, serie = "Valeurs observées")
+
+checkresiduals(CO2_hw)
+```
+**Commentaire :** Ce modèle permet de restreindre la fenètre d'erreur et prédit des valeurs près des valeurs réelles observées, mais le test de Ljung-Box indique qu'il y a encore une tendance dans les données qui n'est pas collectée par le modèle. Une étude plus poussée serait nécessaire.
